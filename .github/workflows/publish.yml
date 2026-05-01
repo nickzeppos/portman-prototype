@@ -43,11 +43,11 @@ jobs:
 
       - name: Build static export
         run: npm run build
-        # Uncomment and set to `/portman` (or whatever the repo name is) if
-        # the site is served from a project subpath rather than a custom
-        # domain or `<user>.github.io` root.
-        # env:
-        #   NEXT_PUBLIC_BASE_PATH: /portman
+        env:
+          # Repo serves at nickzeppos.github.io/portman-prototype, so Next
+          # needs to emit asset/route URLs under that subpath. Drop this
+          # env var if/when the site moves to a custom domain or root.
+          NEXT_PUBLIC_BASE_PATH: /portman-prototype
 
       - uses: actions/configure-pages@v5
 
