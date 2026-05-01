@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import type { Chamber } from '@/lib/schemas/legislator';
 import type { LegislatorRow } from '@/lib/scores';
 import { ordinal } from '@/lib/format';
@@ -157,13 +157,12 @@ export function LegislatorExplorer({
   // values we omit from shareable URLs.
   const defaultCongress = congresses[0].congress;
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
 
   // Read URL params once at mount to seed state (lazy initial state). Later
   // URL updates flow from state → URL via the sync effect below; we do not
-  // re-read searchParams as the source of truth, since router.replace from
-  // our own writes would otherwise create a feedback loop.
+  // re-read searchParams as the source of truth, since our own writes would
+  // otherwise create a feedback loop.
   const [congress, setCongress] = useState<number>(() => {
     const c = parseInt(searchParams.get('congress') ?? '', 10);
     return congresses.some((x) => x.congress === c) ? c : defaultCongress;
@@ -204,16 +203,18 @@ export function LegislatorExplorer({
     }
   }, [state, stateOptions]);
 
-  // Mirror filter state to the URL (replace, no history entry). Defaults
-  // are omitted so the canonical URL has no params.
+  // Mirror filter state to the URL bar so links remain shareable. Uses
+  // history.replaceState directly rather than router.replace because nothing
+  // here reads back from the URL post-mount; sidestepping the router avoids
+  // a static-export navigation path that intermittently scrolls to top.
   useEffect(() => {
     const params = new URLSearchParams();
     if (congress !== defaultCongress) params.set('congress', String(congress));
     if (chamber !== 'house') params.set('chamber', chamber);
     if (state !== null) params.set('state', state);
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [congress, chamber, state, defaultCongress, pathname, router]);
+    window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname);
+  }, [congress, chamber, state, defaultCongress, pathname]);
   const chamberRows = useMemo(
     () => allRows.filter((r) => r.chamber === chamber),
     [allRows, chamber],
