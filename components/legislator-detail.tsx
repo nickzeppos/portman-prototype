@@ -8,6 +8,7 @@ import type { IssueScores } from '@/lib/schemas/legislator';
 import { effectiveParty, type LegislatorRow } from '@/lib/scores';
 import { getIssueDisplayName } from '@/lib/issues';
 import { ordinal } from '@/lib/format';
+import { replaceUrl } from '@/lib/url-sync';
 import { BipartisanshipScatter } from './bipartisanship-scatter';
 import { CareerSparkline, CareerSparklineLegend } from './career-sparkline';
 import { CongressDropdown } from './congress-dropdown';
@@ -156,17 +157,14 @@ export function LegislatorDetail({
   }, [issue, issueScores]);
 
   // Mirror selection state to the URL bar so links remain shareable.
-  // We use history.replaceState directly rather than router.replace because
-  // nothing in this page reads back from the URL post-mount; sidestepping
-  // the router avoids an RSC-navigation path that, on static-exported
-  // builds, intermittently scrolls the page to the top despite scroll:false.
+  // Defaults are omitted; the bioguide stays in the path so cross-bio nav
+  // (which doesn't carry these query params) naturally drops them.
   useEffect(() => {
     const params = new URLSearchParams();
     if (congress !== defaultCongress) params.set('congress', String(congress));
     if (issue !== null) params.set('issue', issue);
     if (basis !== 'chamber') params.set('basis', basis);
-    const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname);
+    replaceUrl(pathname, params);
   }, [congress, issue, basis, defaultCongress, pathname]);
 
   // When an issue is selected, scores, ranks, and sponsorship counts all
