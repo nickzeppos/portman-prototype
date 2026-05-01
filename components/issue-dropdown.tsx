@@ -24,7 +24,7 @@ export function IssueDropdown({
         onClick={() => setOpen((o) => !o)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="inline-flex items-center gap-1 text-base text-gray-700 hover:text-brand"
+        className="inline-flex items-center gap-1 hover:text-brand"
       >
         {value === null ? 'All Issues' : getIssueDisplayName(value)}
         <span className="text-xs leading-none">▾</span>

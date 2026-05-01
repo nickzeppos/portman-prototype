@@ -5,13 +5,14 @@ import Link from 'next/link';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Jost } from 'next/font/google';
 import type { IssueScores } from '@/lib/schemas/legislator';
-import type { LegislatorRow } from '@/lib/scores';
+import { effectiveParty, type LegislatorRow } from '@/lib/scores';
 import { getIssueDisplayName } from '@/lib/issues';
 import { ordinal } from '@/lib/format';
 import { BipartisanshipScatter } from './bipartisanship-scatter';
 import { CareerSparkline, CareerSparklineLegend } from './career-sparkline';
 import { CongressDropdown } from './congress-dropdown';
 import { IssueDropdown } from './issue-dropdown';
+import { BasisDropdown, type Basis } from './basis-dropdown';
 
 const jost = Jost({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
@@ -29,43 +30,6 @@ const PARTY_COLORS: Record<string, string> = {
   R: 'text-red-700',
   I: 'text-gray-700',
 };
-
-const KNOWN_PARTIES = ['D', 'R', 'I'] as const;
-
-// Counts of legislators by party in the rows currently rendered in the
-// chart. Mirrors the explorer's PartyCounts so the breadcrumb conveys at a
-// glance how many of each party are visible after filtering by issue.
-function PartyCounts({ rows }: { rows: LegislatorRow[] }) {
-  const counts = new Map<string, number>();
-  for (const r of rows) counts.set(r.party, (counts.get(r.party) ?? 0) + 1);
-  const order = [
-    ...KNOWN_PARTIES,
-    ...[...counts.keys()].filter(
-      (p) => !KNOWN_PARTIES.includes(p as (typeof KNOWN_PARTIES)[number]),
-    ),
-  ];
-  return (
-    <span className="flex gap-3 text-sm">
-      {order
-        .filter((p) => (counts.get(p) ?? 0) > 0)
-        .map((p) => (
-          <span
-            key={p}
-            className={`font-semibold ${PARTY_COLORS[p] ?? 'text-gray-700'}`}
-          >
-            {counts.get(p)} {p}
-          </span>
-        ))}
-    </span>
-  );
-}
-
-// Pre-rotation dimensions of the career sparkline. After CW rotation the
-// visual occupies SPARK_H wide × SPARK_W tall. Sized to leave room in the
-// right column for the legend (with both pl-4 and pr-4 buffers and a
-// gap-3 between them).
-const SPARK_W = 270;
-const SPARK_H = 280;
 
 function fmtScore(s: number | null): string {
   return s == null ? '—' : s.toFixed(3);
@@ -91,6 +55,7 @@ function MetricsCard({
   billsCosponsored,
   outPartyCosponsored,
   issueLabel,
+  basisLabel,
 }: {
   attract: number | null;
   attractRank: number | null;
@@ -100,6 +65,7 @@ function MetricsCard({
   billsCosponsored: number | null;
   outPartyCosponsored: number | null;
   issueLabel: string;
+  basisLabel: string;
 }) {
   const labelClass = SECTION_LABEL_CLASS;
   const headerClass = `${jost.className} text-[10px] font-bold uppercase tracking-wider text-gray-400`;
@@ -109,7 +75,10 @@ function MetricsCard({
     <div>
       {/* Bipartisanship Metrics: title, then sub-header row + two data rows */}
       <div>
-        <span className={labelClass}>Bipartisanship Metrics · {issueLabel}</span>
+        <span className={labelClass}>
+          <span className="text-brand">Bipartisanship Metrics</span>
+          <span className="font-normal"> · {basisLabel} · {issueLabel}</span>
+        </span>
         <div className="mt-3 grid grid-cols-[1fr_auto_auto] items-baseline gap-x-3">
           <span />
           <span className={`${headerClass} text-right`}>Score</span>
@@ -165,6 +134,9 @@ export function LegislatorDetail({
   const [issue, setIssue] = useState<string | null>(
     () => searchParams.get('issue') || null,
   );
+  const [basis, setBasis] = useState<Basis>(
+    () => (searchParams.get('basis') === 'party' ? 'party' : 'chamber'),
+  );
 
   // Toggling congress always resets the issue selector — different congresses
   // expose different issues for the same legislator, and silently carrying a
@@ -191,12 +163,16 @@ export function LegislatorDetail({
     const params = new URLSearchParams();
     if (congress !== defaultCongress) params.set('congress', String(congress));
     if (issue !== null) params.set('issue', issue);
+    if (basis !== 'chamber') params.set('basis', basis);
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [congress, issue, defaultCongress, pathname, router]);
+  }, [congress, issue, basis, defaultCongress, pathname, router]);
 
   // When an issue is selected, scores, ranks, and sponsorship counts all
   // come from per-issue data. Otherwise the row's overall values are used.
+  // Ranks vary by basis: chamber-wide use precomputed columns; same-party
+  // use the precomputed party columns when no issue is selected, or a
+  // filtered re-sort when one is.
   const {
     displayedAttract,
     displayedOffer,
@@ -206,21 +182,26 @@ export function LegislatorDetail({
     displayedBillsCosponsored,
     displayedOutPartyCosponsored,
   } = useMemo(() => {
+    const myParty = effectiveParty(row.party);
     if (issue === null) {
       return {
         displayedAttract: row.attractScore,
         displayedOffer: row.offerScore,
-        displayedAttractRank: row.attractRank,
-        displayedOfferRank: row.offerRank,
+        displayedAttractRank:
+          basis === 'chamber' ? row.attractRank : row.attractRankParty,
+        displayedOfferRank:
+          basis === 'chamber' ? row.offerRank : row.offerRankParty,
         displayedBillsSponsored: row.billsSponsored,
         displayedBillsCosponsored: row.billsCosponsored,
         displayedOutPartyCosponsored: row.outPartyCosponsored,
       };
     }
     const mine = issueScores[issue];
-    const withIssue = chamberMembers.filter(
-      (m) => m.issueScores[issue] !== undefined,
-    );
+    const withIssue = chamberMembers
+      .filter((m) => m.issueScores[issue] !== undefined)
+      .filter(
+        (m) => basis === 'chamber' || effectiveParty(m.party) === myParty,
+      );
     const attractRank =
       mine == null
         ? null
@@ -254,17 +235,22 @@ export function LegislatorDetail({
       displayedBillsCosponsored: mine?.billsCosponsored ?? null,
       displayedOutPartyCosponsored: mine?.outPartyCosponsored ?? null,
     };
-  }, [issue, issueScores, chamberMembers, row]);
+  }, [issue, issueScores, chamberMembers, row, basis]);
 
   // Chart rows: when an issue is selected, project each member's
   // (attract, offer) onto that issue's scores and drop members who weren't
-  // active in it.
+  // active in it. Under the same-party basis, also drop out-of-party
+  // members so the chart matches the comparison pool used for ranking.
   const chartRows = useMemo<LegislatorRow[]>(() => {
+    const myParty = effectiveParty(row.party);
+    const partyFilter = (m: ChamberMember) =>
+      basis === 'chamber' || effectiveParty(m.party) === myParty;
     if (issue === null) {
-      return chamberMembers;
+      return chamberMembers.filter(partyFilter);
     }
     return chamberMembers
       .filter((m) => m.issueScores[issue] !== undefined)
+      .filter(partyFilter)
       .map((m) => {
         const s = m.issueScores[issue];
         return {
@@ -276,7 +262,7 @@ export function LegislatorDetail({
           mostBipartisanIssue: null,
         };
       });
-  }, [chamberMembers, issue]);
+  }, [chamberMembers, issue, basis, row.party]);
 
   const availableIssues = useMemo(
     () =>
@@ -287,8 +273,18 @@ export function LegislatorDetail({
   );
 
   const chamberLabel = row.chamber === 'house' ? 'House' : 'Senate';
+  const partyAdjective: Record<string, string> = {
+    D: 'Democratic',
+    R: 'Republican',
+  };
+  const partyAdj = partyAdjective[effectiveParty(row.party)] ?? '';
   const issueLabel = issue === null ? 'All Issues' : getIssueDisplayName(issue);
-  const chartTitle = `${issueLabel} — Bipartisanship Among ${chamberLabel} Members in the ${ordinal(congress)} Congress`;
+  const basisLabel = basis === 'chamber' ? 'By Chamber' : 'By Party';
+  const compareLabel =
+    basis === 'chamber'
+      ? `${chamberLabel} Members`
+      : `${partyAdj} ${chamberLabel} Members`;
+  const chartTitle = `${issueLabel} — Bipartisanship Among ${compareLabel} in the ${ordinal(congress)} Congress`;
 
   const highlighted = useMemo(
     () => (r: LegislatorRow) => r.bioguide === row.bioguide,
@@ -297,9 +293,8 @@ export function LegislatorDetail({
 
   return (
     <main className="mx-auto max-w-5xl p-6">
-      {/* Narrow header block — link, name, identity, breadcrumb, chart. The
-          wrapper centers this block within the wider main; the chart's
-          align="left" then keeps everything inside flush-left. */}
+      {/* Narrow content block — link, name, identity, headers, scatter.
+          The wrapper centers this block within the wider main. */}
       <div className="mx-auto max-w-3xl">
         <Link href="/scores" className="text-sm text-brand hover:underline">
           ← All legislators
@@ -310,7 +305,7 @@ export function LegislatorDetail({
         >
           {row.name}
         </h1>
-        <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-gray-600">
           <span
             className={`font-semibold ${PARTY_COLORS[row.party] ?? 'text-gray-700'}`}
           >
@@ -323,9 +318,7 @@ export function LegislatorDetail({
           </span>
           <span className="text-gray-400">·</span>
           <span>{chamberLabel}</span>
-        </div>
-
-        <nav className="mt-6 flex flex-wrap items-center gap-2 text-base text-gray-600">
+          <span className="text-gray-400">·</span>
           {sorted.length > 1 ? (
             <CongressDropdown
               value={congress}
@@ -335,82 +328,90 @@ export function LegislatorDetail({
           ) : (
             <span>{ordinal(sorted[0].congress)} Congress</span>
           )}
-          <span className="text-gray-400">»</span>
+          <span className="text-gray-400">·</span>
+          <BasisDropdown value={basis} onChange={setBasis} />
+          <span className="text-gray-400">·</span>
           <IssueDropdown
             value={issue}
             options={availableIssues}
             onChange={setIssue}
           />
-          <span className="text-gray-400">»</span>
-          <PartyCounts rows={chartRows} />
-        </nav>
+        </div>
 
-        <section className="mt-4">
+        <section className="mt-6 grid grid-cols-[2fr_auto_1fr] gap-4">
+          <div className="py-3">
+            <MetricsCard
+              attract={displayedAttract}
+              attractRank={displayedAttractRank}
+              offer={displayedOffer}
+              offerRank={displayedOfferRank}
+              billsSponsored={displayedBillsSponsored}
+              billsCosponsored={displayedBillsCosponsored}
+              outPartyCosponsored={displayedOutPartyCosponsored}
+              issueLabel={issueLabel}
+              basisLabel={basisLabel}
+            />
+          </div>
+          {/* Faint divider centered in the doubled gutter between metrics and
+              portrait. Auto-sized to its 1px width; the gap-4 on either side
+              gives 1rem of whitespace per side, doubling the previous
+              single-gap-4 spacing. */}
+          <div className="w-px bg-gray-200" aria-hidden />
+          {/* Placeholder slot for the legislator's official portrait. Stretches
+              to match the metrics card's height so the row reads as a unit. */}
+          <div className="flex h-full w-full items-center justify-center rounded bg-gray-100 text-xs uppercase tracking-wider text-gray-400">
+            Portrait
+          </div>
+        </section>
+
+        <section className="mt-6">
+          <span className={SECTION_LABEL_CLASS}>
+            <span className="text-brand">Career Trajectory</span>
+            <span className="font-normal">
+              {' · '}
+              {basisLabel}
+              {' · All Issues '}
+              <svg
+                aria-label="fixed"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+                className="ml-0.5 inline-block h-3 w-3 align-[-0.1em] text-gray-400"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M10 1a4.5 4.5 0 0 0-4.5 4.5V9H5a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-.5V5.5A4.5 4.5 0 0 0 10 1Zm3 8V5.5a3 3 0 1 0-6 0V9h6Z"
+                  clipRule="evenodd"
+                />
+              </svg>
+            </span>
+          </span>
+          <div className="mt-3 flex items-center gap-3">
+            <div className="flex-1">
+              <CareerSparkline
+                memberships={sorted}
+                currentCongress={congress}
+                onCongressChange={handleCongressChange}
+                basis={basis}
+                height={163}
+              />
+            </div>
+            <CareerSparklineLegend
+              memberships={sorted}
+              currentCongress={congress}
+              basis={basis}
+            />
+          </div>
+        </section>
+
+        <section className="mt-6">
           <BipartisanshipScatter
             rows={chartRows}
             highlighted={highlighted}
             title={chartTitle}
             maxWidth={696}
-            align="left"
           />
         </section>
       </div>
-
-      <section className="mt-6 grid grid-cols-2 gap-4">
-        <MetricsCard
-          attract={displayedAttract}
-          attractRank={displayedAttractRank}
-          offer={displayedOffer}
-          offerRank={displayedOfferRank}
-          billsSponsored={displayedBillsSponsored}
-          billsCosponsored={displayedBillsCosponsored}
-          outPartyCosponsored={displayedOutPartyCosponsored}
-          issueLabel={issueLabel}
-        />
-        {/*
-          Rotate the CareerSparkline 90° clockwise so the left-to-right time
-          axis becomes top-to-bottom (earliest at top). The sparkline's
-          natural box here is SPARK_W × SPARK_H; after CW rotation it
-          occupies a SPARK_H × SPARK_W column. The legend is rendered above
-          the rotated chart in normal page orientation.
-        */}
-        <div className="px-4">
-          <span className={SECTION_LABEL_CLASS}>Career Trajectory · All Issues</span>
-          {/* items-center vertically centers the legend on the row, which
-              has the height of the (taller) sparkline wrapper. The selected-
-              congress band is itself vertically centered in the rotated
-              wrapper, so the two end up horizontally aligned. */}
-          <div className="mt-3 flex items-center gap-3">
-            <div
-              className="relative"
-              style={{ width: SPARK_H, height: SPARK_W }}
-            >
-              <div
-                className="absolute left-0 top-0"
-                style={{
-                  width: SPARK_W,
-                  height: SPARK_H,
-                  transform: `translate(${SPARK_H}px, 0) rotate(90deg)`,
-                  transformOrigin: '0 0',
-                }}
-              >
-                <CareerSparkline
-                  memberships={sorted}
-                  currentCongress={congress}
-                  onCongressChange={handleCongressChange}
-                  width={SPARK_W}
-                  height={SPARK_H}
-                  vertical
-                />
-              </div>
-            </div>
-            <CareerSparklineLegend
-              memberships={sorted}
-              currentCongress={congress}
-            />
-          </div>
-        </div>
-      </section>
     </main>
   );
 }
