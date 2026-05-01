@@ -14,9 +14,9 @@ const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 const PRIMARY_NAV_ITEMS = [
   { href: '/scores', label: 'Explore the Data', disabled: false },
-  { href: '/chamber', label: 'Chamber', disabled: true },
-  { href: '/party', label: 'Party', disabled: true },
-  { href: '/issues', label: 'Issue Areas', disabled: true },
+  { href: '/chamber', label: 'Chamber', disabled: false },
+  { href: '/party', label: 'Party', disabled: false },
+  { href: '/issues', label: 'Issue Areas', disabled: false },
 ] as const;
 
 const UTILITY_NAV_LINKS = [

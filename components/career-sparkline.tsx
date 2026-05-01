@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { scaleLinear } from 'd3-scale';
 import { ordinal } from '@/lib/format';
+import { effectiveParty } from '@/lib/scores';
 import type { LegislatorMembership } from './legislator-detail';
+import type { Basis } from './basis-dropdown';
 
 const DEFAULT_W = 760;
 const DEFAULT_H = 130;
@@ -56,6 +58,7 @@ export function CareerSparkline({
   width = DEFAULT_W,
   height = DEFAULT_H,
   vertical = false,
+  basis = 'chamber',
 }: {
   memberships: LegislatorMembership[];
   currentCongress: number;
@@ -63,6 +66,7 @@ export function CareerSparkline({
   width?: number;
   height?: number;
   vertical?: boolean;
+  basis?: Basis;
 }) {
   const W = width;
   const H = height;
@@ -75,32 +79,101 @@ export function CareerSparkline({
   // pinned in SVG-local coords so it tracks the data layer's offset.
   const rotText = (x: number, y: number): string | undefined =>
     vertical ? `rotate(-90 ${x} ${y})` : undefined;
-  const points: SparkPoint[] = useMemo(
+  // Target percentiles for the current basis. When basis flips, displayed
+  // points lerp toward this target so dots and polylines glide rather than
+  // snap to their new vertical positions.
+  const targetPoints: SparkPoint[] = useMemo(
     () =>
       memberships
         .map((m) => {
+          const myParty = effectiveParty(m.row.party);
+          const inPool = (x: { party: string }) =>
+            basis === 'chamber' || effectiveParty(x.party) === myParty;
           const totalAttract = m.chamberMembers.filter(
-            (x) => x.attractScore !== null,
+            (x) => x.attractScore !== null && inPool(x),
           ).length;
           const totalOffer = m.chamberMembers.filter(
-            (x) => x.offerScore !== null,
+            (x) => x.offerScore !== null && inPool(x),
           ).length;
+          const attractRank =
+            basis === 'chamber' ? m.row.attractRank : m.row.attractRankParty;
+          const offerRank =
+            basis === 'chamber' ? m.row.offerRank : m.row.offerRankParty;
           return {
             congress: m.congress,
-            attract: pctFromRank(m.row.attractRank, totalAttract),
-            offer: pctFromRank(m.row.offerRank, totalOffer),
+            attract: pctFromRank(attractRank, totalAttract),
+            offer: pctFromRank(offerRank, totalOffer),
           };
         })
         .sort((a, b) => a.congress - b.congress),
-    [memberships],
+    [memberships, basis],
   );
+
+  const [points, setPoints] = useState<SparkPoint[]>(targetPoints);
+  const pointsRef = useRef(points);
+  pointsRef.current = points;
+  const animRef = useRef<number | null>(null);
+  const didMountRef = useRef(false);
+
+  // Tween from the previously-displayed points to the new target on basis
+  // (or membership) changes. Same-position values pass through unchanged;
+  // null↔value transitions snap rather than ease since the y-axis has no
+  // meaningful midpoint between "unranked" and a percentile.
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true;
+      setPoints(targetPoints);
+      return;
+    }
+    if (animRef.current !== null) cancelAnimationFrame(animRef.current);
+    const startPoints = pointsRef.current;
+    const startTime = performance.now();
+    const ease = (t: number) => 0.5 * (1 - Math.cos(Math.PI * t));
+
+    const lerp = (a: number | null, b: number | null, e: number) => {
+      if (b === null) return null;
+      if (a === null) return b;
+      return a + (b - a) * e;
+    };
+
+    const tick = () => {
+      const progress = Math.min(
+        1,
+        (performance.now() - startTime) / TRANSITION_MS,
+      );
+      const e = ease(progress);
+      const interpolated: SparkPoint[] = targetPoints.map((tp) => {
+        const sp = startPoints.find((p) => p.congress === tp.congress);
+        return {
+          congress: tp.congress,
+          attract: lerp(sp?.attract ?? null, tp.attract, e),
+          offer: lerp(sp?.offer ?? null, tp.offer, e),
+        };
+      });
+      setPoints(interpolated);
+      if (progress < 1) {
+        animRef.current = requestAnimationFrame(tick);
+      } else {
+        animRef.current = null;
+      }
+    };
+    animRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (animRef.current !== null) {
+        cancelAnimationFrame(animRef.current);
+        animRef.current = null;
+      }
+    };
+  }, [targetPoints]);
 
   // Served congresses drive the x-axis. Discontinuous gaps (e.g., 113 →
   // 116) collapse to adjacent ticks; a jagged break marker indicates the
-  // skip on the implied axis between them.
+  // skip on the implied axis between them. Sourced from targetPoints so the
+  // axis stays stable while displayed points are tweening.
   const served = useMemo(
-    () => points.map((p) => p.congress),
-    [points],
+    () => targetPoints.map((p) => p.congress),
+    [targetPoints],
   );
 
   const breakXs = useMemo(() => {
@@ -113,7 +186,9 @@ export function CareerSparkline({
     return out;
   }, [served, UNIT_WIDTH]);
 
-  const hasAnyData = points.some((p) => p.attract !== null || p.offer !== null);
+  const hasAnyData = targetPoints.some(
+    (p) => p.attract !== null || p.offer !== null,
+  );
   if (!hasAnyData) return null;
 
   const xPos = (congress: number) =>
@@ -301,21 +376,30 @@ export function CareerSparkline({
 export function CareerSparklineLegend({
   memberships,
   currentCongress,
+  basis = 'chamber',
 }: {
   memberships: LegislatorMembership[];
   currentCongress: number;
+  basis?: Basis;
 }) {
   const points: SparkPoint[] = memberships.map((m) => {
+    const myParty = effectiveParty(m.row.party);
+    const inPool = (x: { party: string }) =>
+      basis === 'chamber' || effectiveParty(x.party) === myParty;
     const totalAttract = m.chamberMembers.filter(
-      (x) => x.attractScore !== null,
+      (x) => x.attractScore !== null && inPool(x),
     ).length;
     const totalOffer = m.chamberMembers.filter(
-      (x) => x.offerScore !== null,
+      (x) => x.offerScore !== null && inPool(x),
     ).length;
+    const attractRank =
+      basis === 'chamber' ? m.row.attractRank : m.row.attractRankParty;
+    const offerRank =
+      basis === 'chamber' ? m.row.offerRank : m.row.offerRankParty;
     return {
       congress: m.congress,
-      attract: pctFromRank(m.row.attractRank, totalAttract),
-      offer: pctFromRank(m.row.offerRank, totalOffer),
+      attract: pctFromRank(attractRank, totalAttract),
+      offer: pctFromRank(offerRank, totalOffer),
     };
   });
 
