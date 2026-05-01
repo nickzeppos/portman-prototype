@@ -7,6 +7,11 @@ import Link from 'next/link';
 
 const jost = Jost({ subsets: ['latin'], weight: ['500', '600', '700'] });
 
+// Static-export + unoptimized images don't auto-apply basePath to image
+// srcs, so we have to prepend it ourselves. Empty string in dev / for
+// custom-domain deploys.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+
 const PRIMARY_NAV_ITEMS = [
   { href: '/scores', label: 'Explore the Data', disabled: false },
   { href: '/chamber', label: 'Chamber', disabled: true },
@@ -97,7 +102,7 @@ export function SiteHeader() {
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-6 px-6 py-4">
         <Link href="/" className="flex items-center gap-3">
           <Image
-            src="/logo.png"
+            src={`${BASE_PATH}/logo.png`}
             alt="Portman Center logo"
             width={40}
             height={41}
