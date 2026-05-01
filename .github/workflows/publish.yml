@@ -1,0 +1,66 @@
+# Publishes the static export to GitHub Pages on every push to `publish`.
+# Workflow: cut a `publish` branch from `main` (or merge into it) when the
+# main branch is in a publish-ready state. The push to `publish` is what
+# triggers a deploy — `main` itself is never deployed automatically.
+#
+# One-time setup in the GitHub repo:
+#   - Settings → Pages → Build and deployment → Source: "GitHub Actions"
+#   - If deploying to `<user>.github.io/<repo>` (project page rather than a
+#     custom domain), set the workflow env var NEXT_PUBLIC_BASE_PATH to
+#     `/<repo>` so Next emits asset URLs under that subpath. Leave unset
+#     for a custom domain or for `<user>.github.io` (root) deploys.
+
+name: Publish to GitHub Pages
+
+on:
+  push:
+    branches: [publish]
+  workflow_dispatch: {}
+
+# Pages deploys are mutually exclusive — cancel an in-flight run if a new
+# push lands on `publish`.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build static export
+        run: npm run build
+        # Uncomment and set to `/portman` (or whatever the repo name is) if
+        # the site is served from a project subpath rather than a custom
+        # domain or `<user>.github.io` root.
+        # env:
+        #   NEXT_PUBLIC_BASE_PATH: /portman
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4

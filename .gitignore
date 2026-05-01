@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+*.log
+.DS_Store
+.env
+.env.local
+.env.*.local
+next-env.d.ts
+*.tsbuildinfo
+
+# Spec / reference material (source decks, PDFs, brand assets used during
+# design — not required by the runtime)
+inspo/
+
+# Agent / IDE local state
+.claude/
