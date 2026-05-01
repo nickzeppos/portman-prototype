@@ -6,6 +6,7 @@ import type { Chamber } from '@/lib/schemas/legislator';
 import type { LegislatorRow } from '@/lib/scores';
 import { ordinal } from '@/lib/format';
 import { useDismissOnOutside } from '@/lib/use-dismiss-on-outside';
+import { replaceUrl } from '@/lib/url-sync';
 import { BipartisanshipScatter } from './bipartisanship-scatter';
 import { CongressDropdown } from './congress-dropdown';
 import { LegislatorTable } from './legislator-table';
@@ -203,17 +204,14 @@ export function LegislatorExplorer({
     }
   }, [state, stateOptions]);
 
-  // Mirror filter state to the URL bar so links remain shareable. Uses
-  // history.replaceState directly rather than router.replace because nothing
-  // here reads back from the URL post-mount; sidestepping the router avoids
-  // a static-export navigation path that intermittently scrolls to top.
+  // Mirror filter state to the URL bar so links remain shareable. Defaults
+  // are omitted so the canonical URL has no params.
   useEffect(() => {
     const params = new URLSearchParams();
     if (congress !== defaultCongress) params.set('congress', String(congress));
     if (chamber !== 'house') params.set('chamber', chamber);
     if (state !== null) params.set('state', state);
-    const qs = params.toString();
-    window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname);
+    replaceUrl(pathname, params);
   }, [congress, chamber, state, defaultCongress, pathname]);
   const chamberRows = useMemo(
     () => allRows.filter((r) => r.chamber === chamber),
