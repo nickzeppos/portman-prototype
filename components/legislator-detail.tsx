@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Jost } from 'next/font/google';
 import type { IssueScores } from '@/lib/schemas/legislator';
 import { effectiveParty, type LegislatorRow } from '@/lib/scores';
@@ -124,7 +124,6 @@ export function LegislatorDetail({
   // from shareable URLs.
   const defaultCongress = sorted[0].congress;
   const searchParams = useSearchParams();
-  const router = useRouter();
   const pathname = usePathname();
 
   const [congress, setCongress] = useState<number>(() => {
@@ -156,17 +155,19 @@ export function LegislatorDetail({
     }
   }, [issue, issueScores]);
 
-  // Mirror selection state to the URL (replace, no history entry). Defaults
-  // are omitted; the bioguide stays in the path so cross-bio nav (which
-  // doesn't carry these query params) naturally drops them.
+  // Mirror selection state to the URL bar so links remain shareable.
+  // We use history.replaceState directly rather than router.replace because
+  // nothing in this page reads back from the URL post-mount; sidestepping
+  // the router avoids an RSC-navigation path that, on static-exported
+  // builds, intermittently scrolls the page to the top despite scroll:false.
   useEffect(() => {
     const params = new URLSearchParams();
     if (congress !== defaultCongress) params.set('congress', String(congress));
     if (issue !== null) params.set('issue', issue);
     if (basis !== 'chamber') params.set('basis', basis);
     const qs = params.toString();
-    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
-  }, [congress, issue, basis, defaultCongress, pathname, router]);
+    window.history.replaceState(null, '', qs ? `${pathname}?${qs}` : pathname);
+  }, [congress, issue, basis, defaultCongress, pathname]);
 
   // When an issue is selected, scores, ranks, and sponsorship counts all
   // come from per-issue data. Otherwise the row's overall values are used.
